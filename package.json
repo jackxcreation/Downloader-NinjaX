@@ -1,0 +1,69 @@
+{
+  "name": "downloader-ninjax",
+  "version": "2.0.0",
+  "description": "Fast, free, no ads - The ultimate video and music downloader supporting multiple platforms",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "dev": "live-server --port=8080 --host=0.0.0.0",
+    "build": "echo 'Frontend build completed - No build process required for vanilla JS'",
+    "test": "echo 'Frontend tests not implemented yet'",
+    "lint": "echo 'Linting not configured'",
+    "serve": "http-server . -p 8080 -c-1",
+    "deploy": "echo 'Deploy frontend to hosting platform'",
+    "clean": "rm -rf node_modules package-lock.json"
+  },
+  "keywords": [
+    "downloader",
+    "youtube",
+    "instagram",
+    "facebook",
+    "video-downloader",
+    "music-downloader",
+    "free-downloader",
+    "no-ads",
+    "fast-download",
+    "web-app",
+    "flask",
+    "python",
+    "javascript",
+    "html5",
+    "responsive"
+  ],
+  "author": {
+    "name": "Downloader NinjaX Team",
+    "email": "jodjack64@gmail.com",
+    "url": "https://github.com/yourusername/downloader-ninjax"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/downloader-ninjax.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/downloader-ninjax/issues"
+  },
+  "homepage": "https://github.com/yourusername/downloader-ninjax#readme",
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2",
+    "http-server": "^14.1.1",
+    "concurrently": "^7.6.0"
+  },
+  "optionalDependencies": {
+    "prettier": "^2.8.0",
+    "eslint": "^8.30.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead"
+  ],
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/yourusername"
+  }
+}
