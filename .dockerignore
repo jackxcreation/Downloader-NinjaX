@@ -1,0 +1,57 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Tests
+test_*.py
+tests/
+test_results*
+
+# Development
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+downloads/
+temp/
+uploads/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Docker
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
