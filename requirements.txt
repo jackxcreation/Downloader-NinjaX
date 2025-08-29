@@ -1,13 +1,27 @@
+# Core Flask dependencies
 Flask==2.3.3
 Flask-CORS==4.0.0
-Flask-Limiter==3.3.1
+Flask-Limiter==3.5.0
+Werkzeug==2.3.7
+
+# Media downloading dependencies
 yt-dlp==2023.7.6
-instaloader==4.9.6
+instaloader==4.10.3
+
+# HTTP and web scraping
 requests==2.31.0
 beautifulsoup4==4.12.2
 validators==0.22.0
-python-dotenv==1.0.0
+
+# Production server
 gunicorn==21.2.0
-Werkzeug==2.3.7
+
+# Caching and rate limiting (optional)
 redis==4.6.0
-lxml==4.9.3
+
+# Email support
+email-validator==2.0.0
+
+# Additional utilities
+python-dotenv==1.0.0
+Pillow==10.0.0
