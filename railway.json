@@ -1,0 +1,25 @@
+{
+  "name": "Downloader NinjaX API",
+  "build": {
+    "builder": "DOCKERFILE"
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 30
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "DEBUG": "False",
+        "FLASK_ENV": "production"
+      }
+    },
+    "staging": {
+      "variables": {
+        "DEBUG": "True",
+        "FLASK_ENV": "development"
+      }
+    }
+  }
+}
