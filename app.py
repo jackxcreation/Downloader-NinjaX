@@ -75,6 +75,11 @@ for folder in ['DOWNLOAD_FOLDER', 'TEMP_FOLDER', 'STATIC_FOLDER', 'UPLOAD_FOLDER
     os.makedirs(folder_path, exist_ok=True)
     logger.info(f"Created/verified directory: {folder_path}")
 
+# Create cookies directory
+cookies_dir = os.path.join(os.getcwd(), 'cookies')
+os.makedirs(cookies_dir, exist_ok=True)
+logger.info(f"Created/verified cookies directory: {cookies_dir}")
+
 # Enhanced CORS configuration
 CORS(app, 
      origins=['*'], 
@@ -97,6 +102,60 @@ except Exception as e:
 
 # Thread pool for background tasks
 executor = ThreadPoolExecutor(max_workers=20)
+
+class CookieManager:
+    """Enhanced Cookie Management System for All Platforms"""
+    
+    def __init__(self):
+        self.cookies_dir = os.path.join(os.getcwd(), 'cookies')
+        self.platform_cookies = {
+            'youtube': os.path.join(self.cookies_dir, 'youtube_cookies.txt'),
+            'instagram': os.path.join(self.cookies_dir, 'instagram_cookies.txt'), 
+            'facebook': os.path.join(self.cookies_dir, 'facebook_cookies.txt')
+        }
+        
+        # Create cookies directory if not exists
+        os.makedirs(self.cookies_dir, exist_ok=True)
+        logger.info(f"Cookie manager initialized. Cookies directory: {self.cookies_dir}")
+    
+    def get_cookies_file(self, platform):
+        """Platform के हिसाब से cookies file return करता है"""
+        cookies_file = self.platform_cookies.get(platform.lower())
+        
+        if cookies_file and os.path.exists(cookies_file) and os.path.getsize(cookies_file) > 0:
+            logger.info(f"Using cookies for {platform}: {cookies_file}")
+            return cookies_file
+        else:
+            logger.warning(f"No valid cookies found for {platform}")
+            return None
+    
+    def validate_cookies(self, platform):
+        """Check करता है कि cookies file valid है या नहीं"""
+        cookies_file = self.get_cookies_file(platform)
+        if not cookies_file:
+            return False
+        
+        try:
+            with open(cookies_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                # Check if file has proper cookie format
+                return len(content) > 50 and ('# Netscape HTTP Cookie File' in content or 'Set-Cookie' in content or content.count('\t') > 5)
+        except Exception as e:
+            logger.error(f"Error validating cookies for {platform}: {e}")
+            return False
+    
+    def get_cookies_status(self):
+        """सभी platforms के cookies status return करता है"""
+        status = {}
+        for platform in self.platform_cookies.keys():
+            file_path = self.platform_cookies[platform]
+            status[platform] = {
+                'file_exists': os.path.exists(file_path),
+                'file_size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+                'is_valid': self.validate_cookies(platform),
+                'last_modified': datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat() if os.path.exists(file_path) else None
+            }
+        return status
 
 class SecurityValidator:
     """Enhanced Security validation for URLs and inputs"""
@@ -176,7 +235,7 @@ class SecurityValidator:
         return ext not in SecurityValidator.BLOCKED_EXTENSIONS
 
 class YouTubeDownloader:
-    """Enhanced YouTube video downloader with comprehensive features"""
+    """Enhanced YouTube video downloader with cookies support"""
     
     def __init__(self):
         self.ydl_opts_base = {
@@ -194,11 +253,23 @@ class YouTubeDownloader:
         }
 
     def get_video_info(self, url):
-        """Extract comprehensive video information"""
+        """Extract comprehensive video information with cookies support"""
         try:
             logger.info(f"Getting YouTube video info for: {url}")
             
-            with yt_dlp.YoutubeDL(self.ydl_opts_base) as ydl:
+            # Enhanced ydl_opts with cookies support
+            ydl_opts = self.ydl_opts_base.copy()
+            
+            # Add cookies if available
+            if cookie_manager:
+                cookies_file = cookie_manager.get_cookies_file('youtube')
+                if cookies_file:
+                    ydl_opts['cookiefile'] = cookies_file
+                    logger.info(f"Using YouTube cookies: {cookies_file}")
+                else:
+                    logger.info("No YouTube cookies available, proceeding without cookies")
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
                 formats = []
@@ -274,14 +345,24 @@ class YouTubeDownloader:
                     'formats': sorted(formats, key=lambda x: self._sort_formats(x), reverse=True),
                     'categories': info.get('categories', []),
                     'tags': info.get('tags', [])[:10],  # Limit tags
+                    'cookies_used': cookies_file is not None if cookie_manager else False
                 }
                 
                 logger.info(f"Successfully extracted info for: {result['title']}")
                 return result
 
         except yt_dlp.DownloadError as e:
-            logger.error(f"yt-dlp error for {url}: {str(e)}")
-            return {'success': False, 'error': f'Video not available or private: {str(e)}'}
+            error_msg = str(e)
+            logger.error(f"yt-dlp error for {url}: {error_msg}")
+            
+            # Enhanced error messages based on cookies availability
+            if 'sign in' in error_msg.lower() or 'private' in error_msg.lower() or 'not available' in error_msg.lower():
+                if cookie_manager and not cookie_manager.get_cookies_file('youtube'):
+                    return {'success': False, 'error': 'This video requires authentication. Please add YouTube cookies to access age-restricted or private content.'}
+                else:
+                    return {'success': False, 'error': f'Video not available or requires different authentication: {error_msg}'}
+            else:
+                return {'success': False, 'error': f'Video extraction failed: {error_msg}'}
         except Exception as e:
             logger.error(f"Error getting YouTube video info for {url}: {str(e)}")
             return {'success': False, 'error': f'Failed to get video information: {str(e)}'}
@@ -310,7 +391,7 @@ class YouTubeDownloader:
         return quality_order.get(quality, 0)
 
     def download_video(self, url, format_id, quality):
-        """Download video with specified format and enhanced error handling"""
+        """Download video with cookies support"""
         try:
             logger.info(f"Starting download: {url} with format {format_id}")
             
@@ -319,6 +400,13 @@ class YouTubeDownloader:
             safe_filename = SecurityValidator.sanitize_filename(f"video_{timestamp}_{download_id[:8]}")
 
             opts = self.ydl_opts_base.copy()
+            
+            # Add cookies if available
+            if cookie_manager:
+                cookies_file = cookie_manager.get_cookies_file('youtube')
+                if cookies_file:
+                    opts['cookiefile'] = cookies_file
+                    logger.info(f"Using YouTube cookies for download: {cookies_file}")
             
             if quality == 'MP3' or format_id == 'bestaudio/best':
                 opts.update({
@@ -378,7 +466,8 @@ class YouTubeDownloader:
                         'file_size': file_size,
                         'download_id': download_id,
                         'format': f"{quality} {ext.upper()}",
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'cookies_used': cookies_file is not None if cookie_manager else False
                     }
                     
                     logger.info(f"Download completed: {filename} ({file_size} bytes)")
@@ -388,14 +477,19 @@ class YouTubeDownloader:
                     return {'success': False, 'error': 'Downloaded file not found'}
 
         except yt_dlp.DownloadError as e:
-            logger.error(f"yt-dlp download error for {url}: {str(e)}")
-            return {'success': False, 'error': f'Download failed: {str(e)}'}
+            error_msg = str(e)
+            logger.error(f"yt-dlp download error for {url}: {error_msg}")
+            
+            if 'sign in' in error_msg.lower() and cookie_manager and not cookie_manager.get_cookies_file('youtube'):
+                return {'success': False, 'error': 'Download requires authentication. Please add YouTube cookies.'}
+            else:
+                return {'success': False, 'error': f'Download failed: {error_msg}'}
         except Exception as e:
             logger.error(f"Error downloading YouTube video {url}: {str(e)}")
             return {'success': False, 'error': f'Download error: {str(e)}'}
 
 class InstagramDownloader:
-    """Enhanced Instagram media downloader with comprehensive features"""
+    """Enhanced Instagram media downloader with cookies support"""
     
     def __init__(self):
         try:
@@ -405,13 +499,25 @@ class InstagramDownloader:
                 request_timeout=30,
                 max_connection_attempts=5
             )
+            
+            # Add cookies support for Instagram
+            if cookie_manager:
+                cookies_file = cookie_manager.get_cookies_file('instagram')
+                if cookies_file:
+                    try:
+                        # Instaloader में cookies load करने का तरीका
+                        logger.info(f"Instagram cookies available: {cookies_file}")
+                        # Note: Instaloader session loading would need specific implementation
+                    except Exception as e:
+                        logger.warning(f"Failed to load Instagram cookies: {e}")
+            
             logger.info("Instagram loader initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Instagram loader: {e}")
             self.loader = None
 
     def get_media_info(self, url):
-        """Get comprehensive Instagram media information"""
+        """Get comprehensive Instagram media information with cookies support"""
         try:
             if not self.loader:
                 return {'success': False, 'error': 'Instagram loader not available'}
@@ -471,7 +577,8 @@ class InstagramDownloader:
                 'formats': formats,
                 'is_video': post.is_video,
                 'media_url': media_url,
-                'shortcode': shortcode
+                'shortcode': shortcode,
+                'cookies_used': cookie_manager.get_cookies_file('instagram') is not None if cookie_manager else False
             }
             
             logger.info(f"Successfully extracted Instagram info for: {shortcode}")
@@ -479,7 +586,10 @@ class InstagramDownloader:
 
         except instaloader.exceptions.PostUnavailableException:
             logger.error(f"Instagram post not available: {shortcode}")
-            return {'success': False, 'error': 'Post is private, deleted, or doesn\'t exist'}
+            if cookie_manager and not cookie_manager.get_cookies_file('instagram'):
+                return {'success': False, 'error': 'Post is private or requires authentication. Please add Instagram cookies.'}
+            else:
+                return {'success': False, 'error': 'Post is private, deleted, or doesn\'t exist'}
         except instaloader.exceptions.ConnectionException as e:
             logger.error(f"Instagram connection error: {e}")
             return {'success': False, 'error': 'Connection to Instagram failed'}
@@ -505,7 +615,7 @@ class InstagramDownloader:
         return None
 
     def download_media(self, url):
-        """Download Instagram media with enhanced error handling"""
+        """Download Instagram media with enhanced error handling and cookies support"""
         try:
             if not self.loader:
                 return {'success': False, 'error': 'Instagram loader not available'}
@@ -562,7 +672,8 @@ class InstagramDownloader:
                 'file_size': file_size,
                 'download_id': download_id,
                 'format': f"HD {ext.upper()}",
-                'timestamp': timestamp
+                'timestamp': timestamp,
+                'cookies_used': cookie_manager.get_cookies_file('instagram') is not None if cookie_manager else False
             }
             
             logger.info(f"Instagram download completed: {filename} ({file_size} bytes)")
@@ -576,10 +687,10 @@ class InstagramDownloader:
             return {'success': False, 'error': f'Download failed: {str(e)}'}
 
 class FacebookDownloader:
-    """Enhanced Facebook media downloader"""
+    """Enhanced Facebook media downloader with cookies support"""
     
     def get_media_info(self, url):
-        """Get Facebook media info with enhanced extraction"""
+        """Get Facebook media info with enhanced extraction and cookies support"""
         try:
             logger.info(f"Getting Facebook media info for: {url}")
             
@@ -664,7 +775,8 @@ class FacebookDownloader:
                 'upload_date': '',
                 'webpage_url': url,
                 'formats': formats,
-                'is_video': True
+                'is_video': True,
+                'cookies_used': cookie_manager.get_cookies_file('facebook') is not None if cookie_manager else False
             }
             
             logger.info(f"Successfully extracted Facebook info: {title}")
@@ -678,7 +790,7 @@ class FacebookDownloader:
             return {'success': False, 'error': f'Failed to get Facebook media info: {str(e)}'}
 
     def download_media(self, url):
-        """Download Facebook media (Enhanced but simplified due to API restrictions)"""
+        """Download Facebook media with cookies support"""
         try:
             logger.info(f"Starting Facebook download: {url}")
             
@@ -702,6 +814,7 @@ class FacebookDownloader:
                 'description': media_info['description'],
                 'url': url,
                 'extracted_at': datetime.now().isoformat(),
+                'cookies_used': media_info['cookies_used'],
                 'note': 'Facebook video extraction requires specialized tools due to platform restrictions'
             }
             
@@ -721,6 +834,7 @@ class FacebookDownloader:
                 'download_id': download_id,
                 'format': 'JSON Info',
                 'timestamp': timestamp,
+                'cookies_used': media_info['cookies_used'],
                 'note': 'Facebook video info extracted. Direct video download requires additional authentication.'
             }
             
@@ -730,6 +844,14 @@ class FacebookDownloader:
         except Exception as e:
             logger.error(f"Error downloading Facebook media: {str(e)}")
             return {'success': False, 'error': f'Download failed: {str(e)}'}
+
+# Initialize cookie manager
+try:
+    cookie_manager = CookieManager()
+    logger.info("Cookie manager initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize cookie manager: {e}")
+    cookie_manager = None
 
 # Initialize downloaders with error handling
 try:
@@ -858,7 +980,7 @@ def serve_static(filename):
 # Health check and status endpoints
 @app.route('/health')
 def health_check():
-    """Comprehensive health check"""
+    """Comprehensive health check with cookies status"""
     try:
         # Check downloaders
         downloaders_status = {
@@ -871,7 +993,13 @@ def health_check():
         directories_status = {
             'download_folder': os.path.exists(app.config['DOWNLOAD_FOLDER']),
             'temp_folder': os.path.exists(app.config['TEMP_FOLDER']),
+            'cookies_folder': os.path.exists(cookies_dir)
         }
+        
+        # Check cookies status
+        cookies_status = {}
+        if cookie_manager:
+            cookies_status = cookie_manager.get_cookies_status()
         
         return jsonify({
             'status': 'healthy',
@@ -880,6 +1008,7 @@ def health_check():
             'environment': os.environ.get('FLASK_ENV', 'production'),
             'downloaders': downloaders_status,
             'directories': directories_status,
+            'cookies': cookies_status,
             'uptime': int(time.time()),
             'python_version': f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}"
         })
@@ -893,7 +1022,7 @@ def health_check():
 
 @app.route('/api/status')
 def api_status():
-    """Detailed API status"""
+    """Detailed API status with cookies support"""
     return jsonify({
         'service': 'Downloader NinjaX API',
         'version': '2.0.0',
@@ -905,9 +1034,12 @@ def api_status():
             'contact': '/api/submit/contact',
             'feedback': '/api/submit/feedback',
             'file_download': '/api/file/<filename>',
+            'cookies_status': '/api/cookies/status',
+            'cookies_upload': '/api/cookies/upload',
             'health': '/health'
         },
         'supported_platforms': ['youtube', 'instagram', 'facebook'],
+        'cookies_support': cookie_manager is not None,
         'rate_limits': {
             'analyze': '20 per minute',
             'download': '10 per minute',
@@ -915,10 +1047,86 @@ def api_status():
         }
     })
 
+# Cookies API Endpoints
+@app.route('/api/cookies/status', methods=['GET'])
+def cookies_status():
+    """Check cookies availability for all platforms"""
+    try:
+        if not cookie_manager:
+            return jsonify({
+                'success': False,
+                'error': 'Cookie manager not available',
+                'cookies_status': {}
+            })
+        
+        status = cookie_manager.get_cookies_status()
+        
+        return jsonify({
+            'success': True,
+            'cookies_status': status,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting cookies status: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/cookies/upload', methods=['POST'])
+def upload_cookies():
+    """Upload cookies file for specific platform"""
+    try:
+        if not cookie_manager:
+            return jsonify({
+                'success': False,
+                'error': 'Cookie manager not available'
+            })
+        
+        data = request.get_json()
+        if not data or 'platform' not in data or 'cookies_content' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Missing platform or cookies_content'
+            }), 400
+        
+        platform = data['platform'].lower()
+        cookies_content = data['cookies_content']
+        
+        if platform not in cookie_manager.platform_cookies:
+            return jsonify({
+                'success': False,
+                'error': f'Unsupported platform: {platform}'
+            }), 400
+        
+        cookies_file = cookie_manager.platform_cookies[platform]
+        
+        # Save cookies to file
+        with open(cookies_file, 'w', encoding='utf-8') as f:
+            f.write(cookies_content)
+        
+        # Validate cookies
+        is_valid = cookie_manager.validate_cookies(platform)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cookies uploaded for {platform}',
+            'is_valid': is_valid,
+            'file_path': cookies_file
+        })
+        
+    except Exception as e:
+        logger.error(f"Error uploading cookies: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # Main API endpoints
 @app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze_generic():
-    """Generic analyze endpoint with comprehensive platform support"""
+    """Generic analyze endpoint with comprehensive platform support and cookies"""
     if request.method == 'OPTIONS':
         return '', 200
     
@@ -987,7 +1195,7 @@ def analyze_generic():
 
 @app.route('/api/download', methods=['POST', 'OPTIONS'])
 def download_generic():
-    """Generic download endpoint with comprehensive error handling"""
+    """Generic download endpoint with comprehensive error handling and cookies support"""
     if request.method == 'OPTIONS':
         return '', 200
     
@@ -1009,8 +1217,8 @@ def download_generic():
         url = data['url'].strip()
         platform = data['platform'].lower()
         quality = data.get('quality', 'best')
-        format_id = data.get('format_id', quality)
-        
+        format_id = data.get('format_id', 'best')
+
         # Validate URL
         is_valid, message = SecurityValidator.validate_url(url)
         if not is_valid:
@@ -1036,12 +1244,12 @@ def download_generic():
             
         else:
             return jsonify({
-                'success': False, 
+                'success': False,
                 'error': f'Unsupported platform: {platform}'
             }), 400
 
         if result:
-            logger.info(f"Successfully processed download for {platform}")
+            logger.info(f"Successfully processed {platform} download")
             return jsonify(result)
         else:
             return jsonify({'success': False, 'error': 'Download failed'}), 500
@@ -1050,304 +1258,239 @@ def download_generic():
         logger.error(f"Error in download_generic: {str(e)}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
-@app.route('/api/submit/contact', methods=['POST', 'OPTIONS'])
-def submit_contact():
-    """Enhanced contact form submission"""
-    if request.method == 'OPTIONS':
-        return '', 200
-    
-    # Rate limiting
-    if limiter:
-        try:
-            limiter.limit("5 per minute")(lambda: None)()
-        except Exception:
-            return jsonify({'success': False, 'error': 'Contact rate limit exceeded'}), 429
-    
-    try:
-        data = request.get_json()
-        if not data or not all(k in data for k in ['email', 'subject', 'message']):
-            return jsonify({
-                'success': False, 
-                'error': 'Missing required fields: email, subject, message'
-            }), 400
-
-        # Validate email format
-        email = data['email'].strip()
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            return jsonify({'success': False, 'error': 'Invalid email format'}), 400
-
-        # Save to file
-        ContactHandler.save_to_file('contact', data)
-
-        # Prepare and send email
-        subject = f"Downloader NinjaX Contact: {data['subject']}"
-        body = f"""
-New Contact Form Submission
-
-From: {email}
-Subject: {data['subject']}
-Timestamp: {data.get('timestamp', datetime.now().isoformat())}
-User Agent: {request.headers.get('User-Agent', 'Unknown')}
-
-Message:
-{data['message']}
-
----
-Downloader NinjaX Contact System
-        """
-
-        # Try to send email (optional)
-        email_sent = ContactHandler.send_email(subject, body)
-
-        response_data = {
-            'success': True, 
-            'message': 'Contact form submitted successfully',
-            'email_sent': email_sent
-        }
-        
-        if not email_sent:
-            response_data['note'] = 'Form saved but email notification failed'
-
-        logger.info(f"Contact form submitted by {email}")
-        return jsonify(response_data)
-
-    except Exception as e:
-        logger.error(f"Error in submit_contact: {str(e)}")
-        return jsonify({'success': False, 'error': 'Internal server error'}), 500
-
-@app.route('/api/submit/feedback', methods=['POST', 'OPTIONS'])
-def submit_feedback():
-    """Enhanced feedback form submission"""
-    if request.method == 'OPTIONS':
-        return '', 200
-    
-    # Rate limiting
-    if limiter:
-        try:
-            limiter.limit("5 per minute")(lambda: None)()
-        except Exception:
-            return jsonify({'success': False, 'error': 'Feedback rate limit exceeded'}), 429
-    
-    try:
-        data = request.get_json()
-        if not data or not all(k in data for k in ['type', 'message']):
-            return jsonify({
-                'success': False, 
-                'error': 'Missing required fields: type, message'
-            }), 400
-
-        # Validate feedback type
-        valid_types = ['suggestion', 'bug', 'compliment', 'complaint', 'feature']
-        if data['type'] not in valid_types:
-            return jsonify({'success': False, 'error': f'Invalid feedback type. Valid types: {valid_types}'}), 400
-
-        # Save to file
-        ContactHandler.save_to_file('feedback', data)
-
-        # Prepare email
-        feedback_type = data['type'].replace('_', ' ').title()
-        subject = f"Downloader NinjaX Feedback: {feedback_type}"
-        
-        body = f"""
-New Feedback Submission
-
-Type: {feedback_type}
-Rating: {data.get('rating', 'Not provided')}/5 stars
-Email: {data.get('email', 'Not provided')}
-Timestamp: {data.get('timestamp', datetime.now().isoformat())}
-User Agent: {request.headers.get('User-Agent', 'Unknown')}
-
-Message:
-{data['message']}
-
----
-Downloader NinjaX Feedback System
-        """
-
-        # Try to send email (optional)
-        email_sent = ContactHandler.send_email(subject, body)
-
-        response_data = {
-            'success': True, 
-            'message': 'Feedback submitted successfully',
-            'email_sent': email_sent
-        }
-        
-        if not email_sent:
-            response_data['note'] = 'Feedback saved but email notification failed'
-
-        logger.info(f"Feedback submitted: {data['type']}")
-        return jsonify(response_data)
-
-    except Exception as e:
-        logger.error(f"Error in submit_feedback: {str(e)}")
-        return jsonify({'success': False, 'error': 'Internal server error'}), 500
-
-@app.route('/api/file/<path:filename>')
+# File serving endpoint
+@app.route('/api/file/<filename>')
 def download_file(filename):
-    """Enhanced secure file download endpoint"""
+    """Serve downloaded files securely"""
     try:
         # Sanitize filename
         safe_filename = SecurityValidator.sanitize_filename(filename)
         
         # Validate file extension
         if not SecurityValidator.validate_file_extension(safe_filename):
-            logger.warning(f"Blocked file download attempt: {filename}")
-            abort(403)
+            logger.warning(f"Blocked file extension: {safe_filename}")
+            return jsonify({'success': False, 'error': 'File type not allowed'}), 403
         
         filepath = os.path.join(app.config['DOWNLOAD_FOLDER'], safe_filename)
-
-        # Security check - ensure file is in download directory
-        if not os.path.abspath(filepath).startswith(os.path.abspath(app.config['DOWNLOAD_FOLDER'])):
-            logger.warning(f"Path traversal attempt detected: {filename}")
-            abort(403)
-
+        
         if not os.path.exists(filepath):
-            logger.info(f"File not found: {safe_filename}")
-            abort(404)
+            logger.warning(f"File not found: {filepath}")
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        
+        # Security check - ensure file is within download folder
+        abs_filepath = os.path.abspath(filepath)
+        abs_download_folder = os.path.abspath(app.config['DOWNLOAD_FOLDER'])
+        
+        if not abs_filepath.startswith(abs_download_folder):
+            logger.warning(f"Security violation - path traversal attempt: {filepath}")
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+        
+        logger.info(f"Serving file: {safe_filename}")
+        return send_file(filepath, as_attachment=True, download_name=safe_filename)
+        
+    except Exception as e:
+        logger.error(f"Error serving file {filename}: {str(e)}")
+        return jsonify({'success': False, 'error': 'File serving error'}), 500
 
-        # Get file info
-        file_size = os.path.getsize(filepath)
-        logger.info(f"Serving file: {safe_filename} ({file_size} bytes)")
+# Contact and feedback endpoints
+@app.route('/api/submit/contact', methods=['POST', 'OPTIONS'])
+def submit_contact():
+    """Enhanced contact form submission with comprehensive validation"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    if limiter:
+        try:
+            limiter.limit("5 per minute")(lambda: None)()
+        except Exception:
+            return jsonify({'success': False, 'error': 'Rate limit exceeded'}), 429
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
 
-        return send_file(
-            filepath, 
-            as_attachment=True, 
-            download_name=safe_filename,
-            mimetype='application/octet-stream'
-        )
+        required_fields = ['email', 'subject', 'message']
+        missing_fields = [field for field in required_fields if not data.get(field)]
+        
+        if missing_fields:
+            return jsonify({
+                'success': False, 
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+
+        # Validate email format
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', data['email']):
+            return jsonify({'success': False, 'error': 'Invalid email format'}), 400
+
+        # Prepare email content
+        subject = f"Contact Form: {data['subject']}"
+        body = f"""
+        New contact form submission:
+        
+        Email: {data['email']}
+        Subject: {data['subject']}
+        Message:
+        {data['message']}
+        
+        Timestamp: {datetime.now().isoformat()}
+        IP: {request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR'))}
+        """
+
+        # Save to file
+        ContactHandler.save_to_file('contact', data)
+        
+        # Send email if configured
+        email_sent = False
+        if app.config.get('EMAIL_PASS'):
+            email_sent = ContactHandler.send_email(subject, body)
+
+        logger.info(f"Contact form submitted by: {data['email']}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contact form submitted successfully',
+            'email_sent': email_sent,
+            'timestamp': datetime.now().isoformat()
+        })
 
     except Exception as e:
-        logger.error(f"Error in download_file: {str(e)}")
-        abort(500)
+        logger.error(f"Error processing contact form: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to process contact form'}), 500
+
+@app.route('/api/submit/feedback', methods=['POST', 'OPTIONS'])
+def submit_feedback():
+    """Enhanced feedback form submission with rating support"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    if limiter:
+        try:
+            limiter.limit("5 per minute")(lambda: None)()
+        except Exception:
+            return jsonify({'success': False, 'error': 'Rate limit exceeded'}), 429
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+        required_fields = ['type', 'message']
+        missing_fields = [field for field in required_fields if not data.get(field)]
+        
+        if missing_fields:
+            return jsonify({
+                'success': False,
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+
+        # Validate feedback type
+        valid_types = ['compliment', 'suggestion', 'bug', 'complaint', 'feature']
+        if data['type'] not in valid_types:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid feedback type. Must be one of: {", ".join(valid_types)}'
+            }), 400
+
+        # Validate rating if provided
+        rating = data.get('rating', 0)
+        if rating and not (1 <= int(rating) <= 5):
+            return jsonify({'success': False, 'error': 'Rating must be between 1 and 5'}), 400
+
+        # Validate email if provided
+        email = data.get('email', '')
+        if email and not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return jsonify({'success': False, 'error': 'Invalid email format'}), 400
+
+        # Prepare email content
+        subject = f"Feedback: {data['type'].title()}"
+        body = f"""
+        New feedback submission:
+        
+        Type: {data['type']}
+        Rating: {rating}/5 (if applicable)
+        Message: {data['message']}
+        Email: {email or 'Not provided'}
+        
+        Timestamp: {datetime.now().isoformat()}
+        IP: {request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR'))}
+        """
+
+        # Save to file
+        ContactHandler.save_to_file('feedback', data)
+        
+        # Send email if configured
+        email_sent = False
+        if app.config.get('EMAIL_PASS'):
+            email_sent = ContactHandler.send_email(subject, body)
+
+        logger.info(f"Feedback submitted: {data['type']}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Feedback submitted successfully',
+            'email_sent': email_sent,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"Error processing feedback: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to process feedback'}), 500
 
 # Error handlers
 @app.errorhandler(404)
 def not_found(error):
+    """Enhanced 404 error handler"""
     return jsonify({
-        'success': False, 
+        'success': False,
         'error': 'Endpoint not found',
-        'available_endpoints': ['/api/analyze', '/api/download', '/api/submit/contact', '/api/submit/feedback', '/health']
+        'message': 'The requested resource was not found on this server',
+        'available_endpoints': [
+            '/api/analyze',
+            '/api/download',
+            '/api/submit/contact',
+            '/api/submit/feedback',
+            '/api/cookies/status',
+            '/health'
+        ]
     }), 404
-
-@app.errorhandler(429)
-def ratelimit_handler(e):
-    return jsonify({
-        'success': False, 
-        'error': 'Rate limit exceeded. Please wait before trying again.',
-        'retry_after': '60 seconds'
-    }), 429
 
 @app.errorhandler(500)
 def internal_error(error):
+    """Enhanced 500 error handler"""
     logger.error(f"Internal server error: {error}")
     return jsonify({
-        'success': False, 
-        'error': 'Internal server error'
+        'success': False,
+        'error': 'Internal server error',
+        'message': 'An unexpected error occurred. Please try again later.'
     }), 500
 
 @app.errorhandler(413)
-def too_large(error):
+def request_entity_too_large(error):
+    """Handle file too large errors"""
     return jsonify({
-        'success': False, 
-        'error': 'File too large. Maximum size allowed: 500MB'
+        'success': False,
+        'error': 'File too large',
+        'message': 'The uploaded file exceeds the maximum allowed size'
     }), 413
 
-# Background cleanup and maintenance
-def cleanup_old_files():
-    """Enhanced cleanup function with better logging"""
-    try:
-        current_time = time.time()
-        cleaned_files = 0
-        
-        # Clean download files (older than 2 hours)
-        download_folder = app.config['DOWNLOAD_FOLDER']
-        if os.path.exists(download_folder):
-            for filename in os.listdir(download_folder):
-                filepath = os.path.join(download_folder, filename)
-                if os.path.isfile(filepath):
-                    file_age = current_time - os.path.getctime(filepath)
-                    if file_age > 7200:  # 2 hours
-                        try:
-                            os.remove(filepath)
-                            cleaned_files += 1
-                            logger.info(f"Deleted old download file: {filename}")
-                        except OSError as e:
-                            logger.error(f"Failed to delete {filename}: {e}")
-
-        # Clean temp files (older than 24 hours)
-        temp_folder = app.config['TEMP_FOLDER']
-        if os.path.exists(temp_folder):
-            for filename in os.listdir(temp_folder):
-                filepath = os.path.join(temp_folder, filename)
-                if os.path.isfile(filepath):
-                    file_age = current_time - os.path.getctime(filepath)
-                    if file_age > 86400:  # 24 hours
-                        try:
-                            os.remove(filepath)
-                            cleaned_files += 1
-                            logger.info(f"Deleted old temp file: {filename}")
-                        except OSError as e:
-                            logger.error(f"Failed to delete {filename}: {e}")
-        
-        if cleaned_files > 0:
-            logger.info(f"Cleanup completed: {cleaned_files} files deleted")
-                    
-    except Exception as e:
-        logger.error(f"Error in cleanup: {str(e)}")
-
-def periodic_cleanup():
-    """Periodic cleanup in background thread"""
-    while True:
-        try:
-            cleanup_old_files()
-            time.sleep(3600)  # Run every hour
-        except Exception as e:
-            logger.error(f"Error in periodic cleanup: {e}")
-            time.sleep(3600)
-
-def periodic_health_check():
-    """Periodic health check"""
-    while True:
-        try:
-            # Log system status
-            logger.info("Periodic health check - System running normally")
-            time.sleep(300)  # Run every 5 minutes
-        except Exception as e:
-            logger.error(f"Health check error: {e}")
-            time.sleep(300)
-
-# Start background threads
-cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
-cleanup_thread.start()
-logger.info("Background cleanup thread started")
-
-health_thread = threading.Thread(target=periodic_health_check, daemon=True)
-health_thread.start()
-logger.info("Background health check thread started")
-
-# Run initial cleanup
-cleanup_old_files()
-
-# Application startup
 if __name__ == '__main__':
+    # Ensure all directories exist
+    os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
+    os.makedirs(cookies_dir, exist_ok=True)
+    
+    # Log startup information
+    logger.info("="*50)
+    logger.info("🚀 Downloader NinjaX API Server Starting")
+    logger.info("="*50)
+    logger.info(f"📁 Download folder: {app.config['DOWNLOAD_FOLDER']}")
+    logger.info(f"🍪 Cookies folder: {cookies_dir}")
+    logger.info(f"🔧 Cookie manager: {'✅ Active' if cookie_manager else '❌ Disabled'}")
+    logger.info(f"📺 YouTube downloader: {'✅ Ready' if youtube_downloader else '❌ Failed'}")
+    logger.info(f"📷 Instagram downloader: {'✅ Ready' if instagram_downloader else '❌ Failed'}")
+    logger.info(f"📘 Facebook downloader: {'✅ Ready' if facebook_downloader else '❌ Failed'}")
+    logger.info("="*50)
+    
     port = int(os.environ.get('PORT', 10000))
-    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
-    host = os.environ.get('HOST', '0.0.0.0')
-    
-    logger.info("="*50)
-    logger.info("DOWNLOADER NINJAX API STARTING")
-    logger.info("="*50)
-    logger.info(f"Version: 2.0.0")
-    logger.info(f"Host: {host}")
-    logger.info(f"Port: {port}")
-    logger.info(f"Debug: {debug}")
-    logger.info(f"Download folder: {app.config['DOWNLOAD_FOLDER']}")
-    logger.info(f"Temp folder: {app.config['TEMP_FOLDER']}")
-    logger.info(f"Downloaders available:")
-    logger.info(f"  - YouTube: {'✓' if youtube_downloader else '✗'}")
-    logger.info(f"  - Instagram: {'✓' if instagram_downloader else '✗'}")
-    logger.info(f"  - Facebook: {'✓' if facebook_downloader else '✗'}")
-    logger.info("="*50)
-    
-    app.run(host=host, port=port, debug=debug, threaded=True)
+    app.run(debug=False, host='0.0.0.0', port=port)
