@@ -1,5 +1,12 @@
+# Cookies - NEVER COMMIT!
+cookies/*.txt
+cookies/*.json
+!cookies/README.m
+
 # Python
 __pycache__/
+*.pyc
+*.log
 *.py[cod]
 *$py.class
 *.so
@@ -23,7 +30,8 @@ MANIFEST
 
 # Virtual Environment
 venv/
-env/
+.env/
+.env.local
 ENV/
 venv.bak/
 env.bak/
@@ -52,6 +60,11 @@ downloads/
 temp/
 uploads/
 static/temp/
+*.mp3
+*.mp4
+*.webm
+*.jpg
+*.png
 
 # Database
 *.db
