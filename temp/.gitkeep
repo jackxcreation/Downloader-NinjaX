@@ -1,1 +1,11 @@
+# यह downloads और temp folders को git से ignore तो करता है,
+# मगर अगर folder पूरी तरह empty है, तो वो upload भी नहीं होंगे।
+downloads/*
+!downloads/.gitkeep
+
+temp/*
+!temp/.gitkeep
+
+cookies/*.txt
+!cookies/README.md
 
